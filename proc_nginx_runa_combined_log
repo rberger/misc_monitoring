@@ -1,0 +1,156 @@
+#!/usr/bin/env ruby
+
+# '$remote_addr - $remote_user [$time_local] "$request" $status $body_bytes_sent "$http_referer" "$http_user_agent" $request_time';
+
+require 'rubygems'
+require 'thor'
+require 'fastercsv'
+require 'zlib'
+require 'pp'
+
+module RunCombinedParser
+
+  FORMAT_KEYS = [
+                 :remote_addr,
+                 :remote_user,
+                 :time_local,
+                 :request,
+                 :status,
+                 :body_bytes_sent,
+                 :http_referer,
+                 :http_user_agent,
+                 :request_time
+                 ]
+
+  MIN_KEYS = [
+              :request_time,
+              :time_local,
+              :status,
+              :body_bytes_sent
+              ]
+
+  class Cli <Thor
+    class_option :files,
+    :type => :array,
+    :desc => "One or more nginx log files to parse"
+
+    desc "tab", "Parse the specified log file and output as tab delimited"
+    method_option :no_headers,
+    :type => :boolean,
+    :default => false,
+    :desc => "Will not display headers"
+    method_option :select_keys,
+    :type => :string,
+    :desc => "Select which keys to use for display. Use the show_keys command to see options",
+    :default => "MIN_KEYS"
+    method_option :status,
+    :type => :boolean,
+    :desc => "Send line number and other status to STDERR to show progress during the parsing of files",
+    :default => false
+    def tab
+      STDERR.puts "options: #{options.inspect}"
+      unless (selected_keys = key_by_string(options.select_keys))
+        STDERR.puts "Invalid select_keys: options.select_keys.inspect"
+        exit(-1)
+      end
+      opts = options.merge({:selected_keys => selected_keys})
+      STDERR.puts "opts: #{opts.inspect}"
+      opts.files.each do |file|
+        Process.parse_file file, opts
+        Process.tabed opts
+      end
+    end
+
+    desc "inspect_rows", "Parse the specified log file and output as inspections of each row hash"
+    def inspect_rows
+      options.files.each do |file|
+        Process.parse_file file
+        Process.raw_parsed options
+      end
+    end
+    no_tasks do
+      def key_by_string(str)
+        case str
+        when "MIN_KEYS"
+          MIN_KEYS
+        when "FORMAT_KEYS"
+          FORMAT_KEYS
+        else
+          nil
+        end
+      end
+    end
+  end
+
+  class Process
+    ##
+    # Basic parse of file into an array of hashes
+    # @param [String] file_name
+    #
+    def self.parse_file(file_name, opts)
+      @rows = []
+      line_num = 0
+      io = gzipped?(file_name) ? Zlib::GzipReader : File
+
+      io.open(file_name) do |f|
+        f.each_line do |line|
+          STDERR.print "\r#{line_num}" if opts.status && line_num % 100
+          pat = /(\S+)\s+-\s+(\S+)\s+\[(.+)\]\s+"(.*?)"\s+(\d+)\s+(\d+)\s+"(.*?)"\s+"(.*?)"\s+([\d.]+)/
+          m = pat.match(line)
+          if m
+            items = {}
+            FORMAT_KEYS.each_with_index do |k, i|
+              items[k] = m[i+1]
+            end
+            @rows << items
+          else
+            STDERR.puts "Invalid line ##{line_num}: #{line}"
+          end
+          line_num += 1
+        end
+      end
+      @rows
+    end
+    
+    ##
+    # Output pp'd results of each row. Mainly for testing
+    # @param [Hash] opts
+    # @param [Array] rows Optional. Defaults to the class instance @rows
+    #
+    def self.raw_parsed(opts, rows=@rows)
+      rows.each { |r| puts "-------------------------------"; pp r}
+    end
+
+    ##
+    # Take the parsed rows and output as tab deliminated files
+    # @param [Hash] opts
+    # @param [Array] rows Optional. Defaults to the class instance @rows
+    #
+    def self.tabed(opts, rows=@rows)
+      selected_keys = opts.selected_keys
+      puts selected_keys.collect { |k| k.to_s}.join("\t") unless opts[:no_headers]
+      
+      rows.each do |row|
+        FasterCSV($stdout, :col_sep => "\t") {|csv_out| csv_out << selected_keys.collect { |k| row[k]}}
+      end
+    end
+    
+    ##
+    # Helper to test if a file_name is for a gzipped file
+    # @param [String] file_name Name of file to test
+    # @retunr [Boolean] true if the file is gzipped
+    #
+    def self.gzipped?(file_name)
+      begin
+        z = Zlib::GzipReader.open(file_name)
+      rescue Zlib::GzipFile::Error  => e
+        return false if e.class == Zlib::GzipFile::Error && e.message =~ /not in gzip format/
+      end
+      return true
+    end
+  end
+end
+
+if __FILE__ == $0
+  RunCombinedParser::Cli.start
+end
