@@ -50,7 +50,7 @@ module RunCombinedParser
     :desc => "One or more nginx log files to parse",
     :aliases => "-f"
 
-    desc "tab", "Parse the specified log file and output as tab delimited"
+    desc "parse", "Parse the specified log file and output as tab or comma delimited"
     method_option :no_headers,
     :type => :boolean,
     :default => false,
@@ -217,29 +217,6 @@ module RunCombinedParser
       end
       ikeys.each do |k|
         puts "#{k}:\t#{integer_hist[k]}"
-      end
-    end
-    
-    ##
-    # Output pp'd results of each row. Mainly for testing
-    # @param [Hash] opts
-    # @param [Array] rows Optional. Defaults to the class instance @rows
-    #
-    def self.raw_parsed(opts, rows=@rows)
-      rows.each { |r| puts "-------------------------------"; pp r}
-    end
-
-    ##
-    # Take the parsed rows and output as tab deliminated files
-    # @param [Hash] opts
-    # @param [Array] rows Optional. Defaults to the class instance @rows
-    #
-    def self.tabed(opts, rows=@rows)
-      selected_keys = opts.selected_keys
-      puts selected_keys.collect { |k| k.to_s}.join("\t") unless opts[:no_headers]
-      
-      rows.each do |row|
-        FasterCSV($stdout, :col_sep => "\t") {|csv_out| csv_out << selected_keys.collect { |k| row[k]}}
       end
     end
     
